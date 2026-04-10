@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>CPU Scheduling Simulator</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root{
+  --bg:#0b1220;
+  --panel:#121a2f;
+  --panel2:#0f162a;
+  --accent:#7c9cff;
+  --accent2:#22d3ee;
+  --text:#e6edf3;
+  --muted:#94a3b8;
+}
+
+body{
+  font-family:Segoe UI,Arial,sans-serif;
+  background:radial-gradient(1200px 800px at 20% 10%,#0f172a,#060913);
+  color:var(--text);
+  padding:20px;
+}
+
+h1{
+  text-align:center;
+  margin-bottom:24px;
+  letter-spacing:.4px;
+}
+
+.container{
+  display:flex;
+  gap:20px;
+  flex-wrap:wrap;
+}
+
+.box{
+  flex:1;
+  min-width:320px;
+  background:linear-gradient(180deg,var(--panel),var(--panel2));
+  padding:20px;
+  border-radius:14px;
+  border:1px solid #1f2a44;
+  box-shadow:0 20px 40px rgba(0,0,0,.35);
+}
+
+label{color:var(--muted);font-size:13px}
+
+input{
+  padding:8px;
+  margin:6px 0;
+  background:#0a1020;
+  color:var(--text);
+  border:1px solid #27335a;
+  border-radius:6px;
+}
+
+button{
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#041023;
+  border:none;
+  padding:10px 14px;
+  border-radius:8px;
+  cursor:pointer;
+  font-weight:700;
+}
+button:hover{filter:brightness(1.05)}
+
+.process-row input{width:92px;margin-right:6px}
+
+canvas{
+  background:#fff;
+  border-radius:10px;
+  margin-top:12px;
+  padding:8px;
+}
+
+/* Gantt styling */
+.gantt{
+  margin-top:8px;
+}
+
+.gantt span{
+  display:inline-block;
+  padding:8px 12px;
+  margin:4px;
+  background:linear-gradient(135deg,#3b82f6,#06b6d4);
+  border-radius:8px;
+  font-size:13px;
+  color:white;
+  font-weight:600;
+  box-shadow:0 4px 10px rgba(0,0,0,.3);
+}
+
+h3{margin-top:18px}
+</style>
+</head>
+
+<body>
+
+<h1>CPU Scheduling Simulator</h1>
+
+<div class="container">
+
+<!-- LEFT PANEL -->
+<div class="box">
+<h3>Processes</h3>
+
+<label>Number of Processes:</label><br>
+<input type="number" id="numProc" min="1" value="3">
+<button onclick="createInputs()">Create</button>
+
+<div id="procInputs"></div>
+
+<br>
+<label>Time Quantum:</label><br>
+<input type="number" id="quantum" value="2">
+
+<br><br>
+<label><input type="checkbox" id="export"> Export CSV</label>
+
+<br><br>
+<button onclick="runSim()">Run Simulation</button>
+</div>
+
+<!-- RIGHT PANEL -->
+<div class="box">
+<h3>CPU Utilization</h3>
+<canvas id="cpuChart"></canvas>
+</div>
+
+</div>
+
+<h2>Gantt Charts</h2>
+<div id="gantt"></div>
+
+<script>
+let cpuChart=null;
+
+/* -------- CREATE INPUT FIELDS -------- */
+function createInputs(){
+    let n=parseInt(document.getElementById("numProc").value);
+    let box=document.getElementById("procInputs");
+    box.innerHTML="";
+
+    for(let i=0;i<n;i++){
+        box.innerHTML+=`
+        <div class="process-row">
+            <input placeholder="PID" id="pid${i}">
+            <input type="number" placeholder="Arrival" id="at${i}">
+            <input type="number" placeholder="Burst" id="bt${i}">
+        </div>`;
+    }
+}
+
+/* -------- RUN SIMULATION -------- */
+async function runSim(){
+
+    let n=parseInt(document.getElementById("numProc").value);
+    let processes=[];
+
+    for(let i=0;i<n;i++){
+        let pid=document.getElementById(`pid${i}`).value;
+        let at=parseInt(document.getElementById(`at${i}`).value);
+        let bt=parseInt(document.getElementById(`bt${i}`).value);
+
+        if(!pid || isNaN(at) || isNaN(bt)){
+            alert("Fill all process fields correctly");
+            return;
+        }
+
+        processes.push({pid:pid,arrival:at,burst:bt});
+    }
+
+    let quantum=parseInt(document.getElementById("quantum").value);
+    let exportCSV=document.getElementById("export").checked;
+
+    let res=await fetch('/run',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({processes,quantum,export:exportCSV})
+    });
+
+    let data=await res.json();
+
+    /* -------- RENDER CPU CHART -------- */
+    let labels=[];
+    let usage=[];
+
+    document.getElementById("gantt").innerHTML="";
+
+    for(let algo in data){
+        labels.push(algo);
+        usage.push(data[algo].metrics.cpu_util);
+
+        let html=`<h3>${algo}</h3><div class="gantt">`;
+
+        data[algo].gantt.forEach(seg=>{
+            html+=`<span>${seg.pid} (${seg.start}-${seg.end})</span>`;
+        });
+
+        html+="</div>";
+        document.getElementById("gantt").innerHTML+=html;
+    }
+
+    if(cpuChart) cpuChart.destroy();
+
+    cpuChart=new Chart(document.getElementById("cpuChart"),{
+        type:'bar',
+        data:{
+            labels:labels,
+            datasets:[{
+                label:'CPU Utilization (%)',
+                data:usage,
+                backgroundColor:'rgba(99,102,241,0.85)',
+                borderColor:'#6366f1',
+                borderWidth:1,
+                borderRadius:8
+            }]
+        },
+        options:{
+            responsive:true,
+            plugins:{legend:{labels:{color:'#0b1220'}}},
+            scales:{
+                x:{ticks:{color:'#0b1220'}},
+                y:{beginAtZero:true,max:100,ticks:{color:'#0b1220'}}
+            }
+        }
+    });
+}
+</script>
+
+</body>
+</html>
